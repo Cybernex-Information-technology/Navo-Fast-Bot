@@ -1,0 +1,12 @@
+# Maxfiy ma'lumotlar (tokenni GitHub'ga YUKLAMANG)
+.env
+
+# Virtual muhit va kesh
+venv/
+__pycache__/
+*.pyc
+cache.json
+
+# Vaqtinchalik fayllar
+*.log
+.vscode/
