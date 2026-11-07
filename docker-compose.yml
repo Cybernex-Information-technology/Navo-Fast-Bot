@@ -1,0 +1,17 @@
+services:
+  navo_bot:
+    build: .
+    container_name: navo_fast_bot
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./temp:/app/temp
+    # Agar proksi yoki alohida cookie fayl ishlatilsa
+    # - ./cookies.txt:/app/cookies.txt:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"

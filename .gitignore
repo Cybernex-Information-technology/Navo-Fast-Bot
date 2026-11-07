@@ -3,10 +3,18 @@
 
 # Virtual muhit va kesh
 venv/
+.venv/
 __pycache__/
 *.pyc
 cache.json
 
+# Ma'lumotlar bazasi va doimiy fayllar
+data/
+*.db
+*.sqlite3
+
 # Vaqtinchalik fayllar
+temp/
 *.log
+cookies.txt
 .vscode/
