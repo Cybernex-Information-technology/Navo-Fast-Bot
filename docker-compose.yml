@@ -8,6 +8,8 @@ services:
     volumes:
       - ./data:/app/data
       - ./temp:/app/temp
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # Agar proksi yoki alohida cookie fayl ishlatilsa
     # - ./cookies.txt:/app/cookies.txt:ro
     logging:

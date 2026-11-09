@@ -10,7 +10,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand, BotCommandScopeDefault
 
 from core.config import BOT_TOKEN
-from core.database import init_db
+from core.database import close_db, init_db
 from services.bot.handlers import (
     admin_router,
     media_router,
@@ -56,8 +56,8 @@ async def main():
         sys.exit(1)
 
     # 1. Ma'lumotlar bazasini initsializatsiya qilish
-    init_db()
-    log.info("Ma'lumotlar bazasi (SQLite WAL) muvaffaqiyatli ishga tushdi.")
+    await init_db()
+    log.info("Ma'lumotlar bazasi (PostgreSQL) muvaffaqiyatli ulandi.")
 
     # 2. Qolib ketgan eski vaqtinchalik fayllarni tozalash
     cleanup_old_temp_files(max_age_seconds=1800)
@@ -89,6 +89,7 @@ async def main():
     finally:
         log.info("Bot to'xtatilmoqda, sessiyalar yopilyapti...")
         await bot.session.close()
+        await close_db()
 
 
 if __name__ == "__main__":

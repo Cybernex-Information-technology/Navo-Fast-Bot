@@ -13,14 +13,15 @@
    - Videodan faqat 15 soniyalik parcha emas, butun original to'liq qo'shiq topib beriladi.
    - Metama'lumotlar tahlili + Shazam sun'iy intellekti integratsiya qilingan.
 3. **⚡ Tugmalar Hech Qachon Eskirmaydi:**
-   - Server qayta ishga tushganda yoki bot to'xtab qolganda `Bu tugma eskirgan...` xatosi chiqmaydi (to'g'ridan-to'g'ri YouTube ID va SQLite bazasi).
+   - Server qayta ishga tushganda yoki bot to'xtab qolganda `Bu tugma eskirgan...` xatosi chiqmaydi (to'g'ridan-to'g'ri YouTube ID va PostgreSQL bazasi).
 4. **📊 To'liq Admin Panel va Statistika:**
    - `/admin` yoki `/stat` orqali jami foydalanuvchilar soni, 24 soatlik faol odamlar va yuklashlar statistikasi.
    - `/broadcast <matn>` orqali barcha foydalanuvchilarga xabar tarqatish.
 5. **🛡️ Server IP Bloklanishlaridan Himoya:**
    - YouTube `429 Too Many Requests` yoki `Sign in to confirm you're not a bot` muammolari uchun proksi va `cookies.txt` qo'llab-quvvatlanadi.
-6. **💾 Ma'lumotlar Bazasi (SQLite WAL):**
-   - Hech qanday JSON fayl buzilmaydi, parallel yozish 100% xavfsiz.
+6. **💾 Ma'lumotlar Bazasi (PostgreSQL):**
+   - `asyncpg` connection pool, ulanish `.env` dagi `DATABASE_URL` orqali.
+   - Eski SQLite (`data/bot.db`) ma'lumotlarini ko'chirish: `python scripts/migrate_sqlite_to_postgres.py data/bot.db`
 7. **🎉 Kreativ va Xushchaqchaq Yuklash Xabarlari:**
    - Yuklash jarayonida kayfiyatni ko'taruvchi qiziqarli gaplar almashib turadi.
 
@@ -63,7 +64,7 @@
    cp .env.example .env
    nano .env
    ```
-   *(.env fayliga BOT_TOKEN va ADMIN_IDS ni yozing, saqlash uchun `Ctrl+O`, chiqish uchun `Ctrl+X`)*
+   *(.env fayliga BOT_TOKEN, ADMIN_IDS va DATABASE_URL ni yozing, saqlash uchun `Ctrl+O`, chiqish uchun `Ctrl+X`)*
 
 3. Botni ishga tushiring:
    ```bash

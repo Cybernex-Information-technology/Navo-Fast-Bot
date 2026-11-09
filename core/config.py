@@ -29,8 +29,11 @@ if not BOT_USERNAME.startswith("@") and BOT_USERNAME:
     BOT_USERNAME = f"@{BOT_USERNAME}"
 TEAM_NAME = os.getenv("TEAM_NAME", "CyberNexTeam").strip()
 
-# Ma'lumotlar bazasi
-DATABASE_PATH = os.getenv("DATABASE_PATH", str(DATA_DIR / "bot.db")).strip()
+# Ma'lumotlar bazasi (PostgreSQL)
+# Masalan: postgresql://navo:parol@localhost:5432/navo_bot
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+DB_POOL_MIN = int(os.getenv("DB_POOL_MIN", "1"))
+DB_POOL_MAX = int(os.getenv("DB_POOL_MAX", "10"))
 
 # yt-dlp proksi va cookie sozlamalari (server bloklanishining oldini olish uchun)
 YTDLP_PROXY = os.getenv("YTDLP_PROXY", "").strip() or None

@@ -17,6 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Loyiha kodlarini nusxalash
 COPY core/ ./core/
 COPY services/ ./services/
+COPY scripts/ ./scripts/
 COPY bot.py .
 
 # Ma'lumotlar va vaqtinchalik papkalar
