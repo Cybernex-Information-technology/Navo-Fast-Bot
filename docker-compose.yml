@@ -8,8 +8,8 @@ services:
     volumes:
       - ./data:/app/data
       - ./temp:/app/temp
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    networks:
+      - shared-db
     # Agar proksi yoki alohida cookie fayl ishlatilsa
     # - ./cookies.txt:/app/cookies.txt:ro
     logging:
@@ -17,3 +17,7 @@ services:
       options:
         max-size: "20m"
         max-file: "5"
+        
+networks:
+  shared-db:
+    external: true
