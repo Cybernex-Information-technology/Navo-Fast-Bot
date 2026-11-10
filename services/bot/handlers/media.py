@@ -1,6 +1,6 @@
 """
 Video havolalarini qabul qilish va yuklab berish (Instagram, TikTok, YouTube).
-Yuqori sifat (1080p gacha), to'g'ri proporsiya (cho'zilmaydigan) va tezkor kesh.
+Yuqori sifat (1080p gacha), to'g'ri proporsiya va Telegram Dumaloq video (Teleskop).
 """
 import asyncio
 import logging
@@ -9,7 +9,7 @@ import uuid
 from typing import Optional
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.types import CallbackQuery, FSInputFile, Message
 import yt_dlp
 
@@ -23,6 +23,7 @@ from core.database import Database
 from core.fun_phrases import FUN_PHRASES, get_random_phrase
 from services.bot.keyboards.inline import make_media_keyboard
 from services.downloader.cleaner import temporary_directory
+from services.downloader.media_probe import make_round_video_note
 from services.downloader.ytdlp_engine import download_video_file
 
 log = logging.getLogger("media_handler")
@@ -40,11 +41,11 @@ def normalize_media_url(url: str) -> str:
     try:
         parsed = urlparse(url)
         clean_path = parsed.path.rstrip("/") + "/" if "/reel/" in parsed.path or "/p/" in parsed.path else parsed.path
-        
+
         # Instagram havolalarida barcha query parametrlarni tozalash
         if "instagram.com" in parsed.netloc:
             return urlunparse((parsed.scheme, parsed.netloc, clean_path, "", "", ""))
-            
+
         # YouTube da si, feature kabi tracking parametrlarni tozalash
         if "youtube.com" in parsed.netloc or "youtu.be" in parsed.netloc:
             query_params = parse_qs(parsed.query)
@@ -61,7 +62,7 @@ async def animate_progress(status_msg: Message, task: asyncio.Task):
     idx = 0
     while not task.done():
         try:
-            await asyncio.wait({task}, timeout=3.5)
+            await asyncio.wait({task}, timeout=3.0)
             if task.done():
                 break
             idx += 1
@@ -84,11 +85,11 @@ async def on_text_message(message: Message):
 
 
 async def process_video_download(message: Message, url: str):
-    # 1. Keshni tekshirish (agar avval yuklangan bo'lsa, 0.5 soniyada yuboriladi!)
+    # 1. Keshni tekshirish (agar avval yuklangan bo'lsa, soniyada yuboriladi!)
     cached = await Database.get_cached_media(url, "video")
     button_key = uuid.uuid4().hex[:12]
     await Database.save_button_data(button_key, {"url": url})
-    keyboard = make_media_keyboard(music_button_key=button_key)
+    keyboard = make_media_keyboard(button_key=button_key)
 
     if cached:
         file_id, extra = cached
@@ -115,14 +116,6 @@ async def process_video_download(message: Message, url: str):
             job_task = asyncio.create_task(_download_job())
             await animate_progress(status, job_task)
             info, video_path, width, height, duration = job_task.result()
-
-            file_size = video_path.stat().st_size
-            if file_size > MAX_BYTES:
-                await status.edit_text(
-                    "😕 Video hajmi Telegram bot limitidan (50 MB) oshib ketdi.\n"
-                    "Iltimos, qisqaroq yoki pastroq formatdagi video havolasini yuboring."
-                )
-                return
 
             sent_msg = await message.answer_video(
                 video=FSInputFile(video_path),
@@ -155,3 +148,61 @@ async def process_video_download(message: Message, url: str):
     except Exception as e:
         log.exception("Kutilmagan video yuklash xatosi: %s", e)
         await status.edit_text("⚠️ Xatolik yuz berdi. Server birozdan so'ng qayta urinib ko'rishni tavsiya qiladi.")
+
+
+@router.callback_query(F.data.startswith("dl_round:"))
+async def on_make_round_video(call: CallbackQuery, bot: Bot):
+    """
+    @SongFastBot kabi videoni Telegram Dumaloq video (Teleskop / Video Note / Krujochek)
+    qilib beruvchi professional xizmat.
+    """
+    await call.answer()
+    key = call.data.split(":")[1]
+    data = await Database.get_button_data(key)
+    if not data or "url" not in data:
+        await call.message.answer("⌛ Bu havola eskirgan, videoni botga qaytadan yuboring.")
+        return
+
+    url = data["url"]
+
+    # Keshda avval tayyorlangan video_note bormi?
+    cached_round = await Database.get_cached_media(url, "video_note")
+    if cached_round:
+        file_id, _ = cached_round
+        try:
+            await bot.send_video_note(chat_id=call.message.chat.id, video_note=file_id)
+            await Database.increment_user_downloads(call.from_user.id, "round_video")
+            return
+        except Exception as e:
+            log.warning("Keshdagi video_note yuborilmadi: %s", e)
+
+    status = await call.message.answer("🔄 Dumaloq video (Teleskop) tayyorlanmoqda...")
+    try:
+        with temporary_directory("navo_round_") as workdir:
+            async def _round_job():
+                async with DOWNLOAD_SEMAPHORE:
+                    _, vid_path, _, _, _ = await asyncio.to_thread(download_video_file, url, workdir)
+                    out_round = workdir / "round_note.mp4"
+                    await asyncio.to_thread(make_round_video_note, vid_path, out_round)
+                    return out_round
+
+            round_file = await _round_job()
+            sent_note = await bot.send_video_note(
+                chat_id=call.message.chat.id,
+                video_note=FSInputFile(round_file),
+                length=480,
+            )
+
+            if sent_note.video_note:
+                await Database.set_cached_media(
+                    url=url,
+                    media_type="video_note",
+                    file_id=sent_note.video_note.file_id,
+                )
+
+            await Database.increment_user_downloads(call.from_user.id, "round_video")
+            await status.delete()
+
+    except Exception as e:
+        log.exception("Dumaloq video tayyorlashda xatolik: %s", e)
+        await status.edit_text("⚠️ Dumaloq video tayyorlashda xatolik yuz berdi.")

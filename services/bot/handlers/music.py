@@ -1,7 +1,7 @@
 """
-Musiqa bilan ishlash bo'limi:
+Musiqa bilan ishlash bo'limi (@SongFastBot uslubida):
 - Nom bo'yicha qidiruv (5 ta variant)
-- Shazam orqali videodan to'liq MP3 qo'shiqni ajratib berish
+- Videodan to'liq original MP3 qo'shiqni topib berish (Shazam AI orqali)
 - Ovozli xabar (voice) yoki audio fayllardan musiqani aniqlash
 - Hech qachon eskirmaydigan tugmalar (direct callback)
 """
@@ -27,7 +27,7 @@ from services.bot.keyboards.inline import make_promo_keyboard
 from services.downloader.cleaner import temporary_directory
 from services.downloader.ytdlp_engine import download_audio_file, search_youtube_videos
 from services.recognizer.search_service import build_search_response
-from services.recognizer.shazam_service import recognize_track
+from services.recognizer.shazam_service import is_generic_audio, recognize_track
 
 log = logging.getLogger("music_handler")
 router = Router(name="music")
@@ -42,7 +42,7 @@ async def animate_audio_progress(status_msg: Message, task: asyncio.Task):
     idx = 0
     while not task.done():
         try:
-            await asyncio.wait({task}, timeout=3.0)
+            await asyncio.wait({task}, timeout=2.5)
             if task.done():
                 break
             idx += 1
@@ -86,6 +86,8 @@ async def send_full_mp3(
         try:
             await message.answer_audio(
                 audio=file_id,
+                title=title or (extra.get("title") if extra else None),
+                performer=artist or (extra.get("artist") if extra else None),
                 caption=AUDIO_CAPTION,
                 reply_markup=keyboard,
             )
@@ -106,7 +108,6 @@ async def send_full_mp3(
             await animate_audio_progress(status, task)
             info, audio_path = task.result()
 
-            # Cheklovlar
             duration = int(info.get("duration") or 0)
             if duration > MAX_AUDIO_MINUTES * 60:
                 await status.edit_text(f"😕 Audio davomiyligi juda uzun ({MAX_AUDIO_MINUTES} daqiqadan ko'p).")
@@ -116,10 +117,13 @@ async def send_full_mp3(
                 await status.edit_text("😕 Audio fayl hajmi juda katta (50 MB dan oshiq).")
                 return
 
+            final_title = title or info.get("track") or info.get("title") or "Musiqa"
+            final_artist = artist or info.get("artist") or info.get("uploader") or TEAM_NAME
+
             sent_msg = await message.answer_audio(
                 audio=FSInputFile(audio_path),
-                title=title or info.get("track") or info.get("title") or "Musiqa",
-                performer=artist or info.get("artist") or info.get("uploader") or TEAM_NAME,
+                title=final_title,
+                performer=final_artist,
                 duration=duration or None,
                 caption=AUDIO_CAPTION,
                 reply_markup=keyboard,
@@ -131,7 +135,8 @@ async def send_full_mp3(
                     url=url,
                     media_type="audio",
                     file_id=sent_msg.audio.file_id,
-                    title=info.get("title", ""),
+                    title=final_title,
+                    extra={"title": final_title, "artist": final_artist}
                 )
 
             await Database.increment_user_downloads(user_id, "audio")
@@ -160,8 +165,8 @@ async def on_pick_youtube_song(call: CallbackQuery):
 @router.callback_query(F.data.startswith("dl_aud:"))
 async def on_extract_song_from_video(call: CallbackQuery):
     """
-    Video ostidagi «Qo'shiqni yuklab olish» tugmasi bosilganda.
-    Videoni qisqa parchasi emas, butun to'liq original qo'shiqni topib yuboradi!
+    Video ostidagi «Qo'shiqni yuklab olish» tugmasi bosilganda:
+    Videodan to'liq original qo'shiqni topib yuboradi (@SongFastBot uslubida).
     """
     await call.answer()
     key = call.data.split(":")[1]
@@ -185,26 +190,49 @@ async def on_extract_song_from_video(call: CallbackQuery):
     status = await call.message.answer("🎧 Musiqa nomi aniqlanmoqda (Shazam)...")
     try:
         with temporary_directory("navo_shz_") as workdir:
-            # Videoning audiosini ajratib olish
-            async def _extract_job():
-                async with AUDIO_SEMAPHORE:
-                    return await asyncio.to_thread(download_audio_file, url, workdir)
+            # Videoning to'liq toza audiosini ajratib olish
+            info, audio_clip = await asyncio.to_thread(download_audio_file, url, workdir)
 
-            info, audio_clip = await _extract_job()
-
-            # Musiqani aniqlash (avval metama'lumot, keyin Shazam)
+            # Musiqani aniqlash (1-metama'lumot, 2-Shazam AI, 3-sarlavha)
             recognized = await recognize_track(audio_clip, media_info=info)
 
             if recognized:
                 title, artist = recognized
-                query = f"{artist} - {title}".strip(" -")
-                await status.edit_text(f"✨ <b>Topildi:</b> {title} ({artist})\n🔎 To'liq MP3 varianti qidirilmoqda...", parse_mode="HTML")
+                query_artist = artist if not is_generic_audio(artist) else ""
+                search_query = f"{query_artist} {title}".strip()
 
-                # YouTube bo'yicha to'liq qo'shiqni qidirish
-                search_res = await asyncio.to_thread(search_youtube_videos, query, 1)
-                if search_res:
-                    best = search_res[0]
-                    yt_url = f"https://www.youtube.com/watch?v={best['id']}"
+                await status.edit_text(
+                    f"✨ <b>Topildi:</b> {title}" + (f" ({artist})" if artist else "") +
+                    "\n🚀 <b>To'liq MP3 qo'shiq yuklanmoqda...</b>",
+                    parse_mode="HTML"
+                )
+
+                # YouTube orqali to'liq rasmiy audio trekni qidirish
+                search_queries = [
+                    f"{search_query} audio",
+                    f"{search_query} official",
+                    search_query,
+                ]
+
+                best_match = None
+                for sq in search_queries:
+                    search_res = await asyncio.to_thread(search_youtube_videos, sq, 5)
+                    if search_res:
+                        # 1 dan 8 daqiqagacha bo'lgan normal qo'shiq davomiyligini qidirish
+                        for entry in search_res:
+                            dur = entry.get("duration") or 0
+                            entry_title = entry.get("title", "").lower()
+                            # 10 soatlik loop yoki podkastlarni chetlab o'tish
+                            if 60 <= dur <= 480 and "1 hour" not in entry_title and "10 hour" not in entry_title:
+                                best_match = entry
+                                break
+                        if not best_match and search_res:
+                            best_match = search_res[0]
+                        if best_match:
+                            break
+
+                if best_match:
+                    yt_url = f"https://www.youtube.com/watch?v={best_match['id']}"
 
                     # Keshga saqlash
                     await Database.set_cached_media(
@@ -212,23 +240,34 @@ async def on_extract_song_from_video(call: CallbackQuery):
                         media_type="shazam_track",
                         file_id="",
                         title=title,
-                        extra={"yt_id": best["id"], "title": title, "artist": artist}
+                        extra={"yt_id": best_match["id"], "title": title, "artist": artist}
                     )
                     await status.delete()
                     # To'liq MP3 qo'shiqni yuborish
-                    await send_full_mp3(call.message, yt_url, call.from_user.id, title=best["title"], artist=artist)
+                    await send_full_mp3(
+                        call.message,
+                        yt_url,
+                        call.from_user.id,
+                        title=title,
+                        artist=artist or best_match.get("artist"),
+                    )
                     return
 
-            # Agar Shazam orqali to'liq nomi topilmasa, videodagi audio parchasini yuborish
-            await status.edit_text("ℹ️ Qo'shiqning to'liq versiyasi topilmadi, videodagi asl audio yuborilmoqda...")
+            # Agar Shazam aniqlay olmasa (faqat nutq yoki maxsus effekt bo'lsa), videoning o'z audiosini yuborish
+            duration = int(info.get("duration") or 0) or None
+            await status.delete()
             await call.message.answer_audio(
                 audio=FSInputFile(audio_clip),
-                title=info.get("title") or "Video audio",
+                title=info.get("title") or "Original Sound",
                 performer=TEAM_NAME,
-                caption=AUDIO_CAPTION,
+                duration=duration,
+                caption=(
+                    f"{AUDIO_CAPTION}\n\n"
+                    "ℹ️ <i>Videoda alohida qo'shiq aniqlanmadi (asl ovozi yuborildi).\n"
+                    "Boshqa qo'shiq kerak bo'lsa uning nomini yozib yuboring.</i>"
+                ),
                 reply_markup=make_promo_keyboard()
             )
-            await status.delete()
 
     except Exception as e:
         log.exception("Audioni ajratishda xatolik: %s", e)
@@ -245,11 +284,11 @@ async def on_user_media_message(message: Message, bot: Bot):
     if not media:
         return
 
-    if media.file_size and media.file_size > 25 * 1024 * 1024:
-        await message.answer("😕 Fayl hajmi juda katta (25 MB dan kichik audio yoki video yuboring).")
+    if media.file_size and media.file_size > 30 * 1024 * 1024:
+        await message.answer("😕 Fayl hajmi juda katta (30 MB dan kichik audio yoki video yuboring).")
         return
 
-    status = await message.answer("🎧 Musiqa aniqlanmoqda...")
+    status = await message.answer("🎧 Musiqa aniqlanmoqda (Shazam)...")
     try:
         with temporary_directory("navo_identify_") as workdir:
             ext = ".mp4" if (message.video or message.video_note) else ".ogg"
